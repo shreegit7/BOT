@@ -1,0 +1,568 @@
+{
+  "agent": "Codex",
+  "mode": "build_full_project_no_followups",
+  "intent": "Generate a production-quality Discord bot in one go with clean architecture, polished UX, and no need for clarification questions.",
+  "project": {
+    "name": "Friend Server XP + Trivia Bot",
+    "summary": "Build a Discord bot for a private friend server that combines gamified XP, active voice call rewards, daily quiz events, on-demand multiplayer trivia, rank cards, and leaderboards. The bot must feel playful, polished, and psychologically engaging without becoming spammy or abusable."
+  },
+  "hard_requirements": {
+    "no_followups": true,
+    "deliver_complete_codebase": true,
+    "deliver_ready_to-run_project": true,
+    "include_setup_instructions": true,
+    "include_sample_env_file": true,
+    "include_requirements_file": true,
+    "include_sqlite_database_support": true,
+    "include_error_handling": true,
+    "include_logging": true,
+    "include_background_tasks": true,
+    "include_slash_commands": true,
+    "include_button_based_ui": true,
+    "include_embeds": true,
+    "include_cooldowns_and_antifarming": true,
+    "include_modular_architecture": true,
+    "include_comments_only_where_useful": true,
+    "avoid_placeholder_todos": true
+  },
+  "tech_stack": {
+    "language": "Python",
+    "runtime": "Python 3.11+",
+    "discord_library": "discord.py 2.x",
+    "http_client": "aiohttp",
+    "database": "sqlite3",
+    "image_generation_for_rank_card": "Pillow",
+    "config": "python-dotenv",
+    "deployment_target": "Render web service friendly",
+    "process_model": "single process bot with optional lightweight health endpoint only if needed"
+  },
+  "product_goals": {
+    "behavioral_design": [
+      "Make progress visible at all times.",
+      "Reward meaningful participation, not spam.",
+      "Encourage social activity, especially voice calls with others.",
+      "Create healthy competition through public rank and leaderboard systems.",
+      "Use small but frequent rewards to increase retention.",
+      "Use identity markers like titles, levels, and role milestones.",
+      "Reduce friction: most actions should be one click or one slash command away.",
+      "Design for a private friend-group vibe: playful, fun, slightly chaotic, but not toxic."
+    ],
+    "ux_design": [
+      "Use clean Discord embeds and buttons.",
+      "Make quiz flow feel like a real mini-game.",
+      "Keep messages compact and visually readable.",
+      "Avoid walls of text.",
+      "Use consistent color palette and embed style.",
+      "Show countdowns, question progress, answer confirmation, and results clearly."
+    ]
+  },
+  "core_features": {
+    "xp_system": {
+      "overview": "Unified XP system with three sources: chat XP, voice XP, and quiz XP.",
+      "xp_types": [
+        "chat_xp",
+        "voice_xp",
+        "quiz_xp"
+      ],
+      "level_formula": {
+        "model": "simple scalable curve",
+        "implementation_requirement": "Use a formula that feels rewarding early and slightly slower later. Recommended default: required_xp_for_next_level = 100 + (level - 1) * 75, or another clean formula with similar pacing. Store total_xp and calculate level deterministically."
+      },
+      "chat_xp": {
+        "enabled": true,
+        "rules": [
+          "Grant XP only for non-trivial messages.",
+          "Ignore messages shorter than a configurable minimum meaningful length.",
+          "Use per-user cooldown to prevent spam farming.",
+          "Do not reward bot messages.",
+          "Do not reward commands if desired; make this configurable."
+        ],
+        "recommended_defaults": {
+          "xp_per_valid_message_min": 6,
+          "xp_per_valid_message_max": 10,
+          "cooldown_seconds": 45,
+          "minimum_meaningful_length": 12
+        }
+      },
+      "voice_xp": {
+        "enabled": true,
+        "goal": "Reward hanging out in calls, not idling alone.",
+        "rules": [
+          "Only award voice XP if the user is in a voice channel with at least one other non-bot human.",
+          "Do not award XP when the user is alone.",
+          "Track session join time, active intervals, and total voice minutes.",
+          "Use a periodic task that awards XP every fixed interval only if conditions are met.",
+          "Make muted/deafened behavior configurable. Default: allow self-mute but do not award if self-deafened for the entire interval.",
+          "Ignore AFK channel.",
+          "Prevent leave/rejoin abuse by tracking state carefully."
+        ],
+        "recommended_defaults": {
+          "xp_per_interval_base": 5,
+          "interval_minutes": 5,
+          "group_bonus_threshold": 4,
+          "xp_per_interval_with_group_bonus": 7
+        },
+        "stats_to_store": [
+          "total_voice_minutes",
+          "voice_xp_earned",
+          "last_voice_join_at",
+          "current_voice_channel_id",
+          "last_voice_award_check"
+        ]
+      },
+      "level_up": {
+        "requirements": [
+          "Detect level-up immediately when XP changes.",
+          "Send a polished public level-up embed.",
+          "Allow custom funny level-up messages.",
+          "Optional configurable level role rewards."
+        ]
+      }
+    },
+    "rank_and_leaderboards": {
+      "rank_command": {
+        "name": "/rank",
+        "requirements": [
+          "Show user avatar, username, current level, total XP, progress to next level, overall rank, chat XP, voice XP, quiz XP, and total voice time.",
+          "Generate a polished rank card image using Pillow.",
+          "Fallback to embed-only card if image rendering fails.",
+          "Support checking your own rank or another user's rank."
+        ]
+      },
+      "leaderboards": {
+        "commands": [
+          "/leaderboard overall",
+          "/leaderboard voice",
+          "/leaderboard quiz"
+        ],
+        "requirements": [
+          "Show top users in a clean embed.",
+          "Paginate if needed.",
+          "Display the viewer’s own placement even if outside the top list.",
+          "Support separate all-time and weekly quiz leaderboard if possible."
+        ]
+      }
+    },
+    "quiz_system": {
+      "overview": "Multiplayer trivia system with daily scheduled quiz and on-demand quiz matches. Minimum 2 players required. Category selection supported. Use API Ninjas as the question source with local fallback support.",
+      "api_source": {
+        "provider": "API Ninjas Trivia API",
+        "base_url": "https://api.api-ninjas.com/v1/trivia",
+        "auth_header": "X-Api-Key",
+        "env_var": "API_NINJAS_KEY",
+        "notes": [
+          "Do not hardcode API key.",
+          "Use async HTTP requests with timeout and retries.",
+          "Implement graceful fallback if API fails or returns insufficient data."
+        ],
+        "documented_params": {
+          "category": "optional",
+          "limit": "1 to 30"
+        },
+        "documented_categories": [
+          "artliterature",
+          "language",
+          "sciencenature",
+          "general",
+          "fooddrink",
+          "peopleplaces",
+          "geography",
+          "historyholidays",
+          "entertainment",
+          "toysgames",
+          "music",
+          "mathematics",
+          "religionmythology",
+          "sportsleisure"
+        ]
+      },
+      "daily_quiz": {
+        "enabled": true,
+        "requirements": [
+          "Run automatically once per day at a configurable time.",
+          "Post to a configured quiz channel.",
+          "Open a lobby for joining.",
+          "Require minimum 2 players to start.",
+          "Cancel gracefully if not enough players join.",
+          "Rotate or randomize category daily.",
+          "Run 5 questions by default.",
+          "Track daily participation streaks."
+        ],
+        "recommended_defaults": {
+          "lobby_duration_seconds": 30,
+          "questions_per_quiz": 5,
+          "question_time_limit_seconds": 15
+        }
+      },
+      "on_demand_quiz": {
+        "commands": [
+          "/quiz start",
+          "/quiz join",
+          "/quiz leave",
+          "/quiz category",
+          "/quiz cancel"
+        ],
+        "requirements": [
+          "Allow a user to start a quiz lobby.",
+          "Require minimum 2 players.",
+          "Allow selecting category from official supported categories.",
+          "Allow selecting question count from safe presets like 5 or 10.",
+          "Prevent multiple active quizzes per guild.",
+          "Use per-channel or per-guild cooldown to avoid spam."
+        ]
+      },
+      "quiz_flow": {
+        "phases": [
+          "lobby",
+          "question",
+          "answer lock",
+          "reveal",
+          "round scoreboard",
+          "final results"
+        ],
+        "ui_requirements": [
+          "Use embeds for all quiz messages.",
+          "Use buttons for answer choices A, B, C, D when possible.",
+          "If API only returns question and answer without multiple-choice options, generate plausible distractors locally and randomize answer positions.",
+          "Show question number like 3/5.",
+          "Show category.",
+          "Show countdown or time remaining indicator.",
+          "Acknowledge answer submission privately or in a non-spammy way.",
+          "Reveal correct answer clearly.",
+          "Show who answered correctly.",
+          "Show a compact scoreboard after each round."
+        ],
+        "scoring_model": {
+          "requirements": [
+            "Award points for correctness.",
+            "Add a speed bonus for faster correct answers.",
+            "Do not punish wrong answers harshly.",
+            "Award small participation XP for completing a quiz.",
+            "Award bonus XP to winner and podium."
+          ],
+          "recommended_defaults": {
+            "participation_xp": 10,
+            "correct_answer_xp": 15,
+            "fast_answer_bonus_xp": 5,
+            "winner_bonus_xp": 25,
+            "daily_streak_bonus_xp": 10
+          }
+        }
+      },
+      "quiz_data_model": {
+        "store": [
+          "quiz sessions",
+          "participants",
+          "scores",
+          "daily streaks",
+          "quiz wins",
+          "correct answers count",
+          "response times",
+          "category stats"
+        ]
+      }
+    },
+    "roles_and_identity": {
+      "optional_but_include_support": true,
+      "requirements": [
+        "Allow mapping level thresholds to role IDs in config.",
+        "Auto-assign roles when level threshold is reached.",
+        "Avoid removing old roles unless configured.",
+        "Support custom title labels in rank display."
+      ]
+    },
+    "admin_configuration": {
+      "commands": [
+        "/config quiz_channel",
+        "/config levelup_channel",
+        "/config voice_xp on_off",
+        "/config chat_xp on_off",
+        "/config set_daily_quiz_time",
+        "/config set_level_role",
+        "/config set_quiz_cooldown",
+        "/config set_min_players"
+      ],
+      "requirements": [
+        "Restrict admin commands to users with manage guild or administrator permissions.",
+        "Persist config per guild in SQLite.",
+        "Provide helpful confirmation embeds."
+      ]
+    }
+  },
+  "anti_abuse_and_fairness": {
+    "must_have": [
+      "Chat XP cooldown",
+      "Minimum message quality filter",
+      "No solo voice XP",
+      "Ignore AFK channel for voice XP",
+      "One active quiz per guild",
+      "Minimum 2 players required for quiz rewards",
+      "Per-user one answer per question",
+      "Cooldown between on-demand quizzes",
+      "No duplicate daily reward or streak farming"
+    ],
+    "nice_to_have": [
+      "Detect repeated copy-paste spam patterns for chat XP",
+      "Clamp excessive XP sources",
+      "Rate-limit button interactions safely"
+    ]
+  },
+  "architecture": {
+    "style": "modular and maintainable",
+    "recommended_structure": [
+      "main.py",
+      "bot/__init__.py",
+      "bot/config.py",
+      "bot/database.py",
+      "bot/logging_setup.py",
+      "bot/models.py",
+      "bot/utils/levels.py",
+      "bot/utils/time.py",
+      "bot/utils/formatting.py",
+      "bot/utils/rank_card.py",
+      "bot/services/xp_service.py",
+      "bot/services/voice_service.py",
+      "bot/services/quiz_service.py",
+      "bot/services/trivia_api.py",
+      "bot/views/quiz_views.py",
+      "bot/cogs/general.py",
+      "bot/cogs/xp.py",
+      "bot/cogs/quiz.py",
+      "bot/cogs/admin.py",
+      "data/bot.db",
+      ".env.example",
+      "requirements.txt",
+      "README.md"
+    ],
+    "expectations": [
+      "Use cogs/extensions cleanly.",
+      "Use typed Python where practical.",
+      "Separate persistence, business logic, and UI interaction logic.",
+      "Avoid giant single-file implementation."
+    ]
+  },
+  "database_schema": {
+    "requirement": "Design and create SQLite tables automatically on first run.",
+    "tables": [
+      {
+        "name": "guild_config",
+        "columns": [
+          "guild_id PRIMARY KEY",
+          "quiz_channel_id",
+          "levelup_channel_id",
+          "daily_quiz_time",
+          "chat_xp_enabled",
+          "voice_xp_enabled",
+          "min_quiz_players",
+          "quiz_cooldown_minutes",
+          "voice_xp_interval_minutes",
+          "voice_xp_base",
+          "voice_xp_group_bonus",
+          "voice_group_bonus_threshold",
+          "chat_xp_min",
+          "chat_xp_max",
+          "chat_xp_cooldown_seconds"
+        ]
+      },
+      {
+        "name": "user_stats",
+        "columns": [
+          "guild_id",
+          "user_id",
+          "total_xp",
+          "chat_xp",
+          "voice_xp",
+          "quiz_xp",
+          "level",
+          "messages_count",
+          "total_voice_minutes",
+          "quiz_wins",
+          "quizzes_played",
+          "correct_answers",
+          "daily_quiz_streak",
+          "last_daily_quiz_date",
+          "PRIMARY KEY (guild_id, user_id)"
+        ]
+      },
+      {
+        "name": "voice_sessions",
+        "columns": [
+          "guild_id",
+          "user_id",
+          "channel_id",
+          "joined_at",
+          "last_checked_at",
+          "is_active",
+          "PRIMARY KEY (guild_id, user_id)"
+        ]
+      },
+      {
+        "name": "quiz_sessions",
+        "columns": [
+          "session_id PRIMARY KEY",
+          "guild_id",
+          "channel_id",
+          "host_user_id",
+          "quiz_type",
+          "category",
+          "question_count",
+          "started_at",
+          "ended_at",
+          "status"
+        ]
+      },
+      {
+        "name": "quiz_participants",
+        "columns": [
+          "session_id",
+          "user_id",
+          "score",
+          "correct_count",
+          "fast_bonus_count",
+          "joined_at",
+          "PRIMARY KEY (session_id, user_id)"
+        ]
+      }
+    ]
+  },
+  "command_design": {
+    "slash_commands_required": true,
+    "commands": [
+      {
+        "name": "/rank",
+        "description": "Show your rank card or another user’s rank card"
+      },
+      {
+        "name": "/leaderboard",
+        "description": "Show leaderboard by overall, voice, or quiz"
+      },
+      {
+        "name": "/profile",
+        "description": "Show compact stats breakdown"
+      },
+      {
+        "name": "/quiz start",
+        "description": "Start a quiz lobby with category and question count"
+      },
+      {
+        "name": "/quiz join",
+        "description": "Join current quiz lobby"
+      },
+      {
+        "name": "/quiz leave",
+        "description": "Leave current quiz lobby"
+      },
+      {
+        "name": "/dailyquiz",
+        "description": "Show today’s daily quiz info or join if active"
+      },
+      {
+        "name": "/config",
+        "description": "Admin-only configuration group"
+      }
+    ]
+  },
+  "ui_and_visual_design": {
+    "tone": "clean, playful, modern, readable, slightly competitive",
+    "embed_style": {
+      "consistent_colors": true,
+      "use_emojis_sparingly_but_effectively": true,
+      "clear_titles": true,
+      "compact_fields": true,
+      "good_spacing": true
+    },
+    "rank_card": {
+      "requirements": [
+        "Modern card layout",
+        "Avatar",
+        "Username",
+        "Level badge",
+        "XP progress bar",
+        "Rank position",
+        "Voice time",
+        "XP breakdown"
+      ]
+    },
+    "quiz_embeds": {
+      "requirements": [
+        "Lobby embed showing players joined and category",
+        "Question embed with answer buttons",
+        "Reveal embed with correct answer and point gains",
+        "Final podium embed"
+      ]
+    }
+  },
+  "render_deployment": {
+    "requirements": [
+      "Project should run with a simple start command like python main.py",
+      "If Render needs a health endpoint, provide an optional tiny aiohttp or Flask health route without complicating the bot architecture",
+      "Document required environment variables clearly"
+    ],
+    "environment_variables": [
+      "DISCORD_TOKEN",
+      "API_NINJAS_KEY",
+      "DEFAULT_PREFIX",
+      "TZ"
+    ]
+  },
+  "error_handling_and_resilience": {
+    "requirements": [
+      "Graceful API timeout handling",
+      "Retry trivia fetch a limited number of times",
+      "Fallback question pool if API fails",
+      "Prevent crashes from missing permissions",
+      "Log exceptions with enough context",
+      "Fail soft on image generation issues",
+      "Recover bot state after restart where possible"
+    ]
+  },
+  "testing_and_acceptance": {
+    "minimum_manual_checks": [
+      "Bot starts successfully from a clean environment",
+      "SQLite database is created automatically",
+      "Chat XP works with cooldown",
+      "Voice XP only works in active multi-user calls",
+      "Rank card renders",
+      "Leaderboard shows correct order",
+      "Daily quiz posts and can start with 2+ users",
+      "On-demand quiz category selection works",
+      "API Ninjas questions load successfully",
+      "Fallback question system works if API fails",
+      "Admin config persists"
+    ],
+    "acceptance_criteria": [
+      "The project should be runnable without code edits except env values.",
+      "The bot should feel polished enough to use in a live private server immediately.",
+      "The code should be organized and understandable, not a hacked-together prototype."
+    ]
+  },
+  "implementation_preferences": {
+    "prefer_slash_commands_over_prefix": true,
+    "prefer_buttons_over_text_answering": true,
+    "prefer_async_everywhere": true,
+    "prefer_configurable_defaults": true,
+    "prefer_clean_code_over_overengineering": true
+  },
+  "security": {
+    "requirements": [
+      "Do not print secrets in logs.",
+      "Do not hardcode API keys.",
+      "Read secrets only from environment variables.",
+      "Provide .env.example with placeholders only."
+    ]
+  },
+  "final_output_format": {
+    "return": [
+      "Full source code for all files",
+      "requirements.txt",
+      ".env.example",
+      "README.md with setup, permissions, and Render deploy steps"
+    ],
+    "do_not": [
+      "Do not ask clarifying questions",
+      "Do not leave incomplete stubs",
+      "Do not say 'implement later'",
+      "Do not omit working defaults"
+    ]
+  }
+}

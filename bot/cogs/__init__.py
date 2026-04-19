@@ -1,0 +1,1 @@
+# Discord extension cogs package.
