@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import discord
 from PIL import Image, ImageDraw, ImageFont
 
-from bot.utils.formatting import compact_number, progress_bar, short_display
+from bot.utils.formatting import compact_number, short_display
 from bot.utils.time import format_minutes
 
 
@@ -101,11 +101,12 @@ def _render_sync(payload: RankCardPayload) -> io.BytesIO:
     fill_width = int((bar_x2 - bar_x1) * max(0.0, min(1.0, payload.progress_ratio)))
     draw.rounded_rectangle((bar_x1, bar_y1, bar_x1 + fill_width, bar_y2), radius=12, fill="#22D3EE")
 
+    percent = int(max(0.0, min(1.0, payload.progress_ratio)) * 100)
     progress_text = (
         f"{compact_number(payload.level_xp_gained)}/{compact_number(payload.level_xp_needed)} XP"
     )
     draw.text((220, 220), progress_text, font=small_font, fill="#CBD5E1")
-    draw.text((470, 220), progress_bar(payload.progress_ratio, 20), font=small_font, fill="#67E8F9")
+    draw.text((520, 220), f"{percent}%", font=small_font, fill="#67E8F9")
 
     draw.text((58, 248), f"Chat XP  {compact_number(payload.chat_xp)}", font=small_font, fill="#FBBF24")
     draw.text((258, 248), f"Voice XP  {compact_number(payload.voice_xp)}", font=small_font, fill="#86EFAC")

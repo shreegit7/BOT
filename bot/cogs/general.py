@@ -410,10 +410,11 @@ class GeneralCog(commands.Cog):
         gained: int,
         needed: int,
     ) -> discord.Embed:
+        percent = int(max(0.0, min(1.0, ratio)) * 100)
         embed = discord.Embed(
             title=f"{member.display_name} - Rank Card",
             color=Theme.primary,
-            description=f"{progress_bar(ratio)} `{gained}/{needed}` to next level",
+            description=f"Progress: **{gained}/{needed} XP** (**{percent}%**)",
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.add_field(name="Rank", value=f"#{rank_position}", inline=True)
