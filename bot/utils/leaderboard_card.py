@@ -32,51 +32,79 @@ def _short(text: str, limit: int) -> str:
 
 
 def _render_sync(*, title: str, subtitle: str, rows: list[LeaderboardCardRow]) -> io.BytesIO:
-    width, height = 1100, 760
-    image = Image.new("RGB", (width, height), "#0B1020")
+    width, height = 1180, 760
+    image = Image.new("RGB", (width, height), "#1A1030")
     draw = ImageDraw.Draw(image)
 
+    # Diagonal purple gradient background
     for y in range(height):
-        ratio = y / max(1, height - 1)
-        r = int(10 + ratio * 14)
-        g = int(16 + ratio * 22)
-        b = int(30 + ratio * 34)
-        draw.line((0, y, width, y), fill=(r, g, b))
+        y_ratio = y / max(1, height - 1)
+        for x in range(width):
+            x_ratio = x / max(1, width - 1)
+            mix = (x_ratio * 0.55) + (y_ratio * 0.45)
+            r = int(44 + mix * 40)
+            g = int(24 + mix * 24)
+            b = int(82 + mix * 70)
+            image.putpixel((x, y), (r, g, b))
 
-    draw.rounded_rectangle((28, 28, width - 28, height - 28), radius=24, fill="#111827")
-    draw.rounded_rectangle((46, 46, width - 46, height - 46), radius=18, outline="#334155", width=2)
+    # Add subtle diagonal accents
+    for i in range(-height, width, 120):
+        draw.polygon(
+            [(i, 0), (i + 70, 0), (i + height + 70, height), (i + height, height)],
+            fill=(255, 255, 255, 8),
+        )
 
-    title_font = _load_font(44)
-    subtitle_font = _load_font(21)
-    row_font = _load_font(24)
-    row_small_font = _load_font(18)
+    # Outer and inner containers
+    draw.rounded_rectangle((22, 22, width - 22, height - 22), radius=28, fill="#2B1C4F")
+    draw.rounded_rectangle((38, 38, width - 38, height - 38), radius=20, outline="#7C5CD6", width=2)
 
-    draw.text((74, 72), _short(title, 40), font=title_font, fill="#E2E8F0")
-    draw.text((74, 128), _short(subtitle, 80), font=subtitle_font, fill="#93C5FD")
+    # Header band
+    draw.rounded_rectangle((58, 54, width - 58, 142), radius=16, fill="#5F2EB3")
+    draw.rounded_rectangle((58, 120, width - 58, 142), radius=10, fill="#6D35CC")
 
-    row_top = 178
-    row_height = 52
+    title_font = _load_font(50)
+    subtitle_font = _load_font(22)
+    header_font = _load_font(16)
+    row_font = _load_font(23)
+    row_small_font = _load_font(17)
+
+    # Trophy-styled title
+    draw.text((84, 70), f"🏆 {_short(title.upper(), 28)} 🏆", font=title_font, fill="#F9E9FF")
+    draw.text((84, 112), _short(subtitle, 80), font=subtitle_font, fill="#E6D4FF")
+
+    # Table column header
+    table_x1, table_x2 = 62, width - 62
+    header_y1, header_y2 = 162, 198
+    draw.rounded_rectangle((table_x1, header_y1, table_x2, header_y2), radius=8, fill="#45227F")
+    draw.text((88, 171), "RANK", font=header_font, fill="#DCCBFF")
+    draw.text((210, 171), "PLAYER", font=header_font, fill="#DCCBFF")
+    draw.text((660, 171), "POINTS", font=header_font, fill="#DCCBFF")
+    draw.text((900, 171), "DETAILS", font=header_font, fill="#DCCBFF")
+
+    row_top = 210
+    row_height = 50
     if not rows:
         empty_font = _load_font(28)
         help_font = _load_font(20)
-        draw.text((84, row_top + 40), "No leaderboard data yet.", font=empty_font, fill="#CBD5E1")
+        draw.text((84, row_top + 40), "No leaderboard data yet.", font=empty_font, fill="#F2E8FF")
         draw.text(
             (84, row_top + 84),
             "Users will appear here after earning XP or using /profile.",
             font=help_font,
-            fill="#94A3B8",
+            fill="#D5C1FF",
         )
     else:
         for idx, row in enumerate(rows[:10]):
             y = row_top + (idx * row_height)
-            if idx % 2 == 0:
-                draw.rounded_rectangle((70, y - 2, width - 70, y + row_height - 8), radius=10, fill="#0F172A")
+            row_fill = "#6C35C7" if idx % 2 == 0 else "#5C2AAD"
+            draw.rounded_rectangle((70, y, width - 70, y + row_height - 6), radius=8, fill=row_fill)
 
-            left_text = f"{row.rank}. {_short(row.name, 26)}"
-            draw.text((86, y + 8), left_text, font=row_font, fill="#E5E7EB")
-            draw.text((470, y + 8), _short(row.primary, 52), font=row_font, fill="#67E8F9")
+            rank_text = f"{row.rank:02}"
+            draw.text((92, y + 10), rank_text, font=row_font, fill="#FFF3B0")
+            draw.text((210, y + 10), _short(row.name, 33), font=row_font, fill="#FFFFFF")
+            draw.text((660, y + 10), _short(row.primary, 24), font=row_font, fill="#FDFDFD")
             if row.secondary:
-                draw.text((760, y + 11), _short(row.secondary, 40), font=row_small_font, fill="#A5B4FC")
+                draw.text((900, y + 14), _short(row.secondary, 24), font=row_small_font, fill="#EBD8FF")
 
     output = io.BytesIO()
     image.save(output, "PNG")
