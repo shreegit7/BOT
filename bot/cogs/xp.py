@@ -16,10 +16,14 @@ class XPCog(commands.Cog):
     async def cog_load(self) -> None:
         if not self.voice_award_loop.is_running():
             self.voice_award_loop.start()
+        if not self.leaderboard_refresh_loop.is_running():
+            self.leaderboard_refresh_loop.start()
 
     def cog_unload(self) -> None:
         if self.voice_award_loop.is_running():
             self.voice_award_loop.cancel()
+        if self.leaderboard_refresh_loop.is_running():
+            self.leaderboard_refresh_loop.cancel()
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -59,8 +63,21 @@ class XPCog(commands.Cog):
         except Exception:  # noqa: BLE001
             LOGGER.exception("Voice XP loop failure.")
 
+    @tasks.loop(seconds=60)
+    async def leaderboard_refresh_loop(self) -> None:
+        if not self.bot.is_ready():
+            return
+        try:
+            await self.bot.xp_service.run_leaderboard_channel_updates(self.bot)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Leaderboard refresh loop failure.")
+
     @voice_award_loop.before_loop
     async def before_voice_loop(self) -> None:
+        await self.bot.wait_until_ready()
+
+    @leaderboard_refresh_loop.before_loop
+    async def before_leaderboard_loop(self) -> None:
         await self.bot.wait_until_ready()
 
 

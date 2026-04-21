@@ -55,6 +55,50 @@ class AdminConfigCog(commands.GroupCog, name="config", description="Admin-only c
             )
         )
 
+    @app_commands.command(
+        name="leaderboard_channel",
+        description="Set channel used for auto-updating leaderboard posts",
+    )
+    async def leaderboard_channel(
+        self, interaction: discord.Interaction, channel: discord.TextChannel
+    ) -> None:
+        await self.bot.xp_service.update_guild_config_field(
+            interaction.guild.id,
+            "leaderboard_channel_id",
+            channel.id,
+        )
+        await self.bot.xp_service.update_guild_config_field(
+            interaction.guild.id,
+            "leaderboard_message_id",
+            None,
+        )
+        await interaction.response.send_message(
+            embed=self._ok_embed(
+                "Leaderboard Channel Updated",
+                f"Live leaderboard will post in {channel.mention}.",
+            )
+        )
+
+    @app_commands.command(
+        name="set_leaderboard_interval",
+        description="Set auto leaderboard refresh interval in minutes (0 = off)",
+    )
+    async def set_leaderboard_interval(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 0, 60]
+    ) -> None:
+        await self.bot.xp_service.update_guild_config_field(
+            interaction.guild.id,
+            "leaderboard_update_minutes",
+            int(minutes),
+        )
+        if minutes == 0:
+            msg = "Auto leaderboard updates are now **OFF**."
+        else:
+            msg = f"Auto leaderboard will refresh every **{minutes} minute(s)**."
+        await interaction.response.send_message(
+            embed=self._ok_embed("Leaderboard Interval Updated", msg)
+        )
+
     @app_commands.command(name="voice_xp", description="Enable or disable voice XP awards")
     async def voice_xp(self, interaction: discord.Interaction, on_off: bool) -> None:
         await self.bot.xp_service.update_guild_config_field(
@@ -64,6 +108,25 @@ class AdminConfigCog(commands.GroupCog, name="config", description="Admin-only c
         )
         await interaction.response.send_message(
             embed=self._ok_embed("Voice XP Updated", f"Voice XP is now **{'ON' if on_off else 'OFF'}**.")
+        )
+
+    @app_commands.command(
+        name="set_voice_interval",
+        description="Set voice tracking/award interval in minutes",
+    )
+    async def set_voice_interval(
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 30]
+    ) -> None:
+        await self.bot.xp_service.update_guild_config_field(
+            interaction.guild.id,
+            "voice_xp_interval_minutes",
+            int(minutes),
+        )
+        await interaction.response.send_message(
+            embed=self._ok_embed(
+                "Voice Interval Updated",
+                f"Voice tracking interval set to **{minutes} minute(s)**.",
+            )
         )
 
     @app_commands.command(name="chat_xp", description="Enable or disable chat XP awards")
@@ -119,20 +182,49 @@ class AdminConfigCog(commands.GroupCog, name="config", description="Admin-only c
 
     @app_commands.command(name="set_quiz_cooldown", description="Set on-demand quiz cooldown (minutes)")
     async def set_quiz_cooldown(
-        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 1, 240]
+        self, interaction: discord.Interaction, minutes: app_commands.Range[int, 0, 240]
     ) -> None:
         await self.bot.xp_service.update_guild_config_field(
             interaction.guild.id,
             "quiz_cooldown_minutes",
             int(minutes),
         )
+        if minutes == 0:
+            message = "Cooldown is now **OFF**."
+        else:
+            message = f"Cooldown set to **{minutes} minutes**."
         await interaction.response.send_message(
-            embed=self._ok_embed("Quiz Cooldown Updated", f"Cooldown set to **{minutes} minutes**.")
+            embed=self._ok_embed("Quiz Cooldown Updated", message)
+        )
+
+    @app_commands.command(
+        name="quiz_cooldown",
+        description="Quickly turn on/off on-demand quiz cooldown timer",
+    )
+    async def quiz_cooldown(self, interaction: discord.Interaction, on_off: bool) -> None:
+        cfg = await self.bot.xp_service.get_guild_config(interaction.guild.id)
+        if on_off:
+            minutes = cfg.quiz_cooldown_minutes if cfg.quiz_cooldown_minutes > 0 else 10
+            await self.bot.xp_service.update_guild_config_field(
+                interaction.guild.id,
+                "quiz_cooldown_minutes",
+                int(minutes),
+            )
+            msg = f"Cooldown timer is now **ON** ({minutes} minutes)."
+        else:
+            await self.bot.xp_service.update_guild_config_field(
+                interaction.guild.id,
+                "quiz_cooldown_minutes",
+                0,
+            )
+            msg = "Cooldown timer is now **OFF**."
+        await interaction.response.send_message(
+            embed=self._ok_embed("Quiz Cooldown Timer", msg)
         )
 
     @app_commands.command(name="set_min_players", description="Set minimum players required to reward quiz XP")
     async def set_min_players(
-        self, interaction: discord.Interaction, count: app_commands.Range[int, 2, 20]
+        self, interaction: discord.Interaction, count: app_commands.Range[int, 1, 20]
     ) -> None:
         await self.bot.xp_service.update_guild_config_field(
             interaction.guild.id,

@@ -13,11 +13,14 @@ CREATE TABLE IF NOT EXISTS guild_config (
     guild_id INTEGER PRIMARY KEY,
     quiz_channel_id INTEGER,
     levelup_channel_id INTEGER,
+    leaderboard_channel_id INTEGER,
+    leaderboard_message_id INTEGER,
     daily_quiz_time TEXT NOT NULL DEFAULT '20:00',
     chat_xp_enabled INTEGER NOT NULL DEFAULT 1,
     voice_xp_enabled INTEGER NOT NULL DEFAULT 1,
     min_quiz_players INTEGER NOT NULL DEFAULT 2,
     quiz_cooldown_minutes INTEGER NOT NULL DEFAULT 10,
+    leaderboard_update_minutes INTEGER NOT NULL DEFAULT 5,
     voice_xp_interval_minutes INTEGER NOT NULL DEFAULT 5,
     voice_xp_base INTEGER NOT NULL DEFAULT 5,
     voice_xp_group_bonus INTEGER NOT NULL DEFAULT 7,
@@ -136,6 +139,7 @@ class Database:
         )
         self._connection.row_factory = sqlite3.Row
         await self.executescript(SCHEMA_SQL)
+        await self._run_migrations()
 
     async def close(self) -> None:
         if self._connection is None:
@@ -205,3 +209,20 @@ class Database:
     def _executescript_sync(self, script: str) -> None:
         connection = self._connection_or_raise()
         connection.executescript(script)
+
+    async def _run_migrations(self) -> None:
+        columns = await self.fetchall("PRAGMA table_info(guild_config)")
+        existing = {str(row["name"]) for row in columns}
+
+        migrations: list[str] = []
+        if "leaderboard_channel_id" not in existing:
+            migrations.append("ALTER TABLE guild_config ADD COLUMN leaderboard_channel_id INTEGER")
+        if "leaderboard_message_id" not in existing:
+            migrations.append("ALTER TABLE guild_config ADD COLUMN leaderboard_message_id INTEGER")
+        if "leaderboard_update_minutes" not in existing:
+            migrations.append(
+                "ALTER TABLE guild_config ADD COLUMN leaderboard_update_minutes INTEGER NOT NULL DEFAULT 5"
+            )
+
+        for statement in migrations:
+            await self.execute(statement)

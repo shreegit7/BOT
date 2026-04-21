@@ -9,11 +9,14 @@ class GuildConfig:
     guild_id: int
     quiz_channel_id: int | None = None
     levelup_channel_id: int | None = None
+    leaderboard_channel_id: int | None = None
+    leaderboard_message_id: int | None = None
     daily_quiz_time: str = "20:00"
     chat_xp_enabled: bool = True
     voice_xp_enabled: bool = True
     min_quiz_players: int = 2
     quiz_cooldown_minutes: int = 10
+    leaderboard_update_minutes: int = 5
     voice_xp_interval_minutes: int = 5
     voice_xp_base: int = 5
     voice_xp_group_bonus: int = 7
@@ -40,11 +43,18 @@ class GuildConfig:
             levelup_channel_id=(
                 int(row["levelup_channel_id"]) if row["levelup_channel_id"] else None
             ),
+            leaderboard_channel_id=(
+                int(row["leaderboard_channel_id"]) if row["leaderboard_channel_id"] else None
+            ),
+            leaderboard_message_id=(
+                int(row["leaderboard_message_id"]) if row["leaderboard_message_id"] else None
+            ),
             daily_quiz_time=str(row["daily_quiz_time"]),
             chat_xp_enabled=bool(row["chat_xp_enabled"]),
             voice_xp_enabled=bool(row["voice_xp_enabled"]),
             min_quiz_players=int(row["min_quiz_players"]),
             quiz_cooldown_minutes=int(row["quiz_cooldown_minutes"]),
+            leaderboard_update_minutes=int(row["leaderboard_update_minutes"]),
             voice_xp_interval_minutes=int(row["voice_xp_interval_minutes"]),
             voice_xp_base=int(row["voice_xp_base"]),
             voice_xp_group_bonus=int(row["voice_xp_group_bonus"]),

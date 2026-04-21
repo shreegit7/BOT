@@ -69,7 +69,7 @@ README.md
 - `TZ`: timezone used for daily quiz scheduling
 
 ## Optional Environment Variables
-- `QUIZAPI_KEY` (recommended): QuizAPI key used as trivia provider
+- `QUIZAPI_KEY`: optional secondary trivia provider key (QuizAPI)
 - `DATABASE_PATH` (default: `data/bot.db`)
 - `LOG_LEVEL` (default: `INFO`)
 - `SYNC_COMMANDS_ON_STARTUP` (default: `true`)
@@ -97,7 +97,7 @@ Recommended bot permissions:
 ### User
 - `/rank [user]`
 - `/profile [user]`
-- `/leaderboard metric:[overall|voice|quiz] timeframe:[all-time|weekly]`
+- `/leaderboard metric:[overall|voice|quiz|stats] timeframe:[all-time|weekly]` (includes graphical leaderboard card)
 - `/dailyquiz [join:true|false]`
 
 ### Quiz
@@ -110,11 +110,15 @@ Recommended bot permissions:
 ### Admin Config
 - `/config quiz_channel <channel>`
 - `/config levelup_channel <channel>`
+- `/config leaderboard_channel <channel>`
+- `/config set_leaderboard_interval <minutes>` (`0` disables auto updates)
 - `/config voice_xp <on_off>`
+- `/config set_voice_interval <minutes>`
 - `/config chat_xp <on_off>`
 - `/config set_daily_quiz_time <HH:MM>`
 - `/config set_level_role <level> <role> [title_label]`
-- `/config set_quiz_cooldown <minutes>`
+- `/config set_quiz_cooldown <minutes>` (`0` disables cooldown)
+- `/config quiz_cooldown <on_off>`
 - `/config set_min_players <count>`
 
 ## Anti-Abuse + Fairness Rules
@@ -132,9 +136,10 @@ Recommended bot permissions:
 - Daily streak update guarded against duplicate same-day farming
 
 ## Trivia Source + Fallback
-- Provider: QuizAPI Questions API (`Authorization: Bearer ...`)
+- Primary provider: Open Trivia DB (`https://opentdb.com/api.php`)
+- Secondary provider: QuizAPI (`Authorization: Bearer ...`) when `QUIZAPI_KEY` is set
 - Robust retries and timeout handling
-- Local fallback question bank automatically used when QuizAPI fails or is unavailable
+- Local fallback question bank automatically used when providers fail or are unavailable
 - Multiple-choice options are synthesized when source provides only Q/A
 
 ## Render Deployment

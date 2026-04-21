@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import random
 import re
@@ -181,8 +182,26 @@ QUESTION_KEYWORD_DISTRACTORS: dict[str, list[str]] = {
     "basketball": ["2", "3", "4"],
 }
 
+OPENTDB_CATEGORY_MAP: dict[str, int] = {
+    "general": 9,
+    "artliterature": 10,
+    "language": 9,
+    "sciencenature": 17,
+    "fooddrink": 9,
+    "peopleplaces": 26,
+    "geography": 22,
+    "historyholidays": 23,
+    "entertainment": 11,
+    "toysgames": 16,
+    "music": 12,
+    "mathematics": 19,
+    "religionmythology": 20,
+    "sportsleisure": 21,
+}
+
 
 class TriviaAPI:
+    OPENTDB_URL = "https://opentdb.com/api.php"
     QUIZAPI_URL = "https://quizapi.io/api/v1/questions"
 
     def __init__(self, *, quizapi_key: str) -> None:
@@ -212,19 +231,27 @@ class TriviaAPI:
             if text and text.strip()
         }
 
-        questions: list[TriviaQuestion] = []
-        if self.quizapi_key:
+        questions = await self._fetch_opentdb_questions(
+            clean_category,
+            clean_limit,
+            clean_difficulty,
+            excluded_keys,
+        )
+
+        current_keys = excluded_keys | {self._question_key(q.question) for q in questions}
+        if len(questions) < clean_limit and self.quizapi_key:
+            needed = clean_limit - len(questions)
             questions.extend(
                 await self._fetch_quizapi_questions(
                     clean_category,
-                    clean_limit,
+                    needed,
                     clean_difficulty,
-                    excluded_keys,
+                    current_keys,
                 )
             )
-        elif not self._missing_quizapi_key_warned:
+        elif len(questions) < clean_limit and not self._missing_quizapi_key_warned:
             LOGGER.info(
-                "QUIZAPI_KEY is missing. Using local fallback trivia pool only."
+                "QUIZAPI_KEY is missing. Using Open Trivia DB + local fallback only."
             )
             self._missing_quizapi_key_warned = True
 
@@ -275,6 +302,143 @@ class TriviaAPI:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=timeout)
         return self._session
+
+    async def _fetch_opentdb_questions(
+        self,
+        category: str,
+        limit: int,
+        difficulty: str,
+        excluded_keys: set[str],
+    ) -> list[TriviaQuestion]:
+        multiplier = {"easy": 2, "medium": 3, "hard": 4}[difficulty]
+        request_limit = max(limit, min(50, limit * multiplier))
+        params = {
+            "amount": str(request_limit),
+            "type": "multiple",
+            "difficulty": difficulty,
+        }
+        mapped_category = OPENTDB_CATEGORY_MAP.get(category)
+        if mapped_category is not None:
+            params["category"] = str(mapped_category)
+
+        timeout = aiohttp.ClientTimeout(total=10)
+        backoff = 1.0
+        errors: list[str] = []
+
+        for attempt in range(1, 4):
+            try:
+                session = await self._session_or_create(timeout)
+                async with session.get(self.OPENTDB_URL, params=params) as response:
+                    if response.status != 200:
+                        body = await response.text()
+                        errors.append(f"HTTP {response.status}: {body[:160]}")
+                        if attempt < 3:
+                            await asyncio.sleep(backoff)
+                            backoff *= 1.5
+                        continue
+
+                    payload = await response.json()
+                    parsed = self._parse_opentdb_payload(
+                        payload=payload,
+                        requested_category=category,
+                        requested_difficulty=difficulty,
+                        limit=request_limit,
+                        excluded_keys=excluded_keys,
+                    )
+                    if parsed:
+                        return self._select_questions_by_difficulty(
+                            parsed, limit, difficulty
+                        )
+                    errors.append(self._opentdb_empty_reason(payload))
+                    break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                errors.append(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.exception("Unexpected Open Trivia DB error")
+                errors.append(str(exc))
+
+            if attempt < 3:
+                await asyncio.sleep(backoff)
+                backoff *= 1.5
+
+        if errors:
+            LOGGER.warning("Open Trivia DB failed after retries: %s", " | ".join(errors))
+        return []
+
+    def _parse_opentdb_payload(
+        self,
+        *,
+        payload: Any,
+        requested_category: str,
+        requested_difficulty: str,
+        limit: int,
+        excluded_keys: set[str],
+    ) -> list[TriviaQuestion]:
+        if not isinstance(payload, dict):
+            return []
+        results = payload.get("results")
+        if not isinstance(results, list):
+            return []
+
+        parsed: list[TriviaQuestion] = []
+        seen: set[str] = set(excluded_keys)
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            question_text = html.unescape(str(item.get("question") or "").strip())
+            correct_answer = html.unescape(str(item.get("correct_answer") or "").strip())
+            incorrect_answers = item.get("incorrect_answers")
+            if (
+                not question_text
+                or not correct_answer
+                or not isinstance(incorrect_answers, list)
+            ):
+                continue
+
+            qkey = self._question_key(question_text)
+            if qkey in seen:
+                continue
+
+            wrong: list[str] = []
+            wrong_seen: set[str] = {correct_answer.lower()}
+            for raw in incorrect_answers:
+                candidate = html.unescape(str(raw or "").strip())
+                if not candidate:
+                    continue
+                lowered = candidate.lower()
+                if lowered in wrong_seen:
+                    continue
+                wrong_seen.add(lowered)
+                wrong.append(candidate)
+
+            if len(wrong) >= 3:
+                options = [correct_answer, wrong[0], wrong[1], wrong[2]]
+                random.shuffle(options)
+                correct_index = options.index(correct_answer)
+            else:
+                options, correct_index = self._build_options(
+                    question_text=question_text,
+                    correct_answer=correct_answer,
+                    category=requested_category,
+                    difficulty=requested_difficulty,
+                    extra_answers=wrong,
+                )
+
+            parsed.append(
+                TriviaQuestion(
+                    question=question_text,
+                    correct_answer=correct_answer,
+                    options=options,
+                    correct_index=correct_index,
+                    category=requested_category,
+                )
+            )
+            seen.add(qkey)
+            if len(parsed) >= limit:
+                break
+
+        return parsed
 
     async def _fetch_quizapi_questions(
         self,
@@ -656,6 +820,22 @@ class TriviaAPI:
         if isinstance(payload, list):
             return f"QuizAPI returned {len(payload)} item(s), none parseable for this quiz mode."
         return "QuizAPI returned empty/unsupported payload."
+
+    def _opentdb_empty_reason(self, payload: Any) -> str:
+        if not isinstance(payload, dict):
+            return "Open Trivia DB returned unsupported payload."
+        response_code = payload.get("response_code")
+        reasons = {
+            1: "No results for the selected query.",
+            2: "Invalid query parameters.",
+            3: "Session token not found.",
+            4: "Session token exhausted.",
+        }
+        if isinstance(response_code, int):
+            if response_code == 0:
+                return "Open Trivia DB returned zero parseable questions."
+            return f"Open Trivia DB response_code={response_code}: {reasons.get(response_code, 'Unknown error')}"
+        return "Open Trivia DB returned no usable questions."
 
     def _build_fallback_questions(
         self,

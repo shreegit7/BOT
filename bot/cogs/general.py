@@ -10,6 +10,7 @@ from discord.ext import commands
 
 from bot.models import LeaderboardEntry, UserStats
 from bot.utils.formatting import Theme, compact_number, progress_bar
+from bot.utils.leaderboard_card import LeaderboardCardRow, render_leaderboard_card
 from bot.utils.levels import progress_in_level
 from bot.utils.rank_card import render_rank_card
 from bot.utils.time import format_minutes
@@ -43,13 +44,20 @@ class LeaderboardPaginationView(discord.ui.View):
         self.next_button.disabled = self.page >= self.total_pages
 
     async def _render_page(self) -> discord.Embed:
-        entries = await self.cog.bot.xp_service.get_leaderboard(
-            self.guild_id,
-            self.metric,
-            limit=10,
-            offset=(self.page - 1) * 10,
-            weekly=self.weekly,
-        )
+        if self.metric == "stats":
+            entries = await self.cog.bot.xp_service.get_stats_leaderboard(
+                self.guild_id,
+                limit=10,
+                offset=(self.page - 1) * 10,
+            )
+        else:
+            entries = await self.cog.bot.xp_service.get_leaderboard(
+                self.guild_id,
+                self.metric,
+                limit=10,
+                offset=(self.page - 1) * 10,
+                weekly=self.weekly,
+            )
         guild = self.cog.bot.get_guild(self.guild_id)
         return self.cog.build_leaderboard_embed(
             guild=guild,
@@ -181,6 +189,7 @@ class GeneralCog(commands.Cog):
             app_commands.Choice(name="overall", value="overall"),
             app_commands.Choice(name="voice", value="voice"),
             app_commands.Choice(name="quiz", value="quiz"),
+            app_commands.Choice(name="stats", value="stats"),
         ],
         timeframe=[
             app_commands.Choice(name="all-time", value="all_time"),
@@ -208,22 +217,31 @@ class GeneralCog(commands.Cog):
             return
 
         total_users = await self.bot.xp_service.count_users_for_metric(
-            interaction.guild.id, metric_value, weekly=weekly
+            interaction.guild.id,
+            "overall" if metric_value == "stats" else metric_value,
+            weekly=weekly and metric_value == "quiz",
         )
         total_pages = max(1, math.ceil(total_users / 10)) if total_users else 1
         viewer_rank = await self.bot.xp_service.get_rank_position(
             interaction.guild.id,
             interaction.user.id,
-            metric=metric_value,
-            weekly=weekly,
+            metric="overall" if metric_value == "stats" else metric_value,
+            weekly=weekly and metric_value == "quiz",
         )
-        entries = await self.bot.xp_service.get_leaderboard(
-            interaction.guild.id,
-            metric_value,
-            limit=10,
-            offset=0,
-            weekly=weekly,
-        )
+        if metric_value == "stats":
+            entries = await self.bot.xp_service.get_stats_leaderboard(
+                interaction.guild.id,
+                limit=10,
+                offset=0,
+            )
+        else:
+            entries = await self.bot.xp_service.get_leaderboard(
+                interaction.guild.id,
+                metric_value,
+                limit=10,
+                offset=0,
+                weekly=weekly,
+            )
 
         embed = self.build_leaderboard_embed(
             guild=interaction.guild,
@@ -234,8 +252,31 @@ class GeneralCog(commands.Cog):
             total_pages=total_pages,
             viewer_rank=viewer_rank,
         )
+        file: discord.File | None = None
+        try:
+            card_rows = self._build_leaderboard_card_rows(
+                guild=interaction.guild,
+                metric=metric_value,
+                entries=entries,
+                page=1,
+            )
+            card_title = self._leaderboard_title(metric_value, weekly)
+            subtitle = f"Top players in {interaction.guild.name}"
+            card = await render_leaderboard_card(
+                title=card_title,
+                subtitle=subtitle,
+                rows=card_rows,
+            )
+            file = discord.File(card, filename="leaderboard_card.png")
+            embed.set_image(url="attachment://leaderboard_card.png")
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Leaderboard card rendering failed for guild=%s", interaction.guild.id)
+
         if total_pages <= 1:
-            await interaction.response.send_message(embed=embed)
+            if file:
+                await interaction.response.send_message(embed=embed, file=file)
+            else:
+                await interaction.response.send_message(embed=embed)
             return
 
         view = LeaderboardPaginationView(
@@ -246,7 +287,10 @@ class GeneralCog(commands.Cog):
             viewer_rank=viewer_rank,
             total_pages=total_pages,
         )
-        await interaction.response.send_message(embed=embed, view=view)
+        if file:
+            await interaction.response.send_message(embed=embed, file=file, view=view)
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="dailyquiz", description="Show today's daily quiz info or join if active")
     @app_commands.describe(join="Set to true to join the active daily quiz lobby")
@@ -297,7 +341,7 @@ class GeneralCog(commands.Cog):
         guild: discord.Guild | None,
         metric: str,
         weekly: bool,
-        entries: list[LeaderboardEntry],
+        entries: list[object],
         page: int,
         total_pages: int,
         viewer_rank: int | None,
@@ -306,23 +350,48 @@ class GeneralCog(commands.Cog):
             "overall": "Overall XP",
             "voice": "Voice XP",
             "quiz": "Quiz XP" if not weekly else "Weekly Quiz Points",
+            "stats": "Server Stats",
         }[metric]
         title = f"{metric_label} Leaderboard"
         if weekly:
             title = "Weekly Quiz Leaderboard"
 
         lines: list[str] = []
-        for entry in entries:
-            if guild:
-                member = guild.get_member(entry.user_id)
-                name = member.display_name if member else f"User {entry.user_id}"
-            else:
-                name = f"User {entry.user_id}"
-            lines.append(f"**{entry.rank}.** {name} - {compact_number(entry.value)}")
+        if metric == "stats":
+            for index, raw in enumerate(entries, start=((page - 1) * 10) + 1):
+                if not isinstance(raw, dict):
+                    continue
+                user_id = int(raw.get("user_id", 0))
+                if guild:
+                    member = guild.get_member(user_id)
+                    name = member.display_name if member else f"User {user_id}"
+                else:
+                    name = f"User {user_id}"
+                lines.append(
+                    (
+                        f"**{index}. {name}** | Lv {int(raw.get('level', 0))} | "
+                        f"XP {compact_number(int(raw.get('total_xp', 0)))}\n"
+                        f"Chat {compact_number(int(raw.get('chat_xp', 0)))} | "
+                        f"Voice {compact_number(int(raw.get('voice_xp', 0)))} | "
+                        f"Quiz {compact_number(int(raw.get('quiz_xp', 0)))} | "
+                        f"Voice Time {format_minutes(int(raw.get('total_voice_minutes', 0)))} | "
+                        f"Wins {compact_number(int(raw.get('quiz_wins', 0)))}"
+                    )
+                )
+        else:
+            for raw in entries:
+                if not isinstance(raw, LeaderboardEntry):
+                    continue
+                if guild:
+                    member = guild.get_member(raw.user_id)
+                    name = member.display_name if member else f"User {raw.user_id}"
+                else:
+                    name = f"User {raw.user_id}"
+                lines.append(f"**{raw.rank}.** {name} - {compact_number(raw.value)}")
 
         embed = discord.Embed(
             title=title,
-            description="\n".join(lines) if lines else "No entries yet.",
+            description="\n\n".join(lines) if lines else "No entries yet.",
             color=Theme.primary,
         )
         embed.set_footer(text=f"Page {page}/{total_pages}")
@@ -357,6 +426,66 @@ class GeneralCog(commands.Cog):
         if stats.title_label:
             embed.add_field(name="Title", value=stats.title_label, inline=True)
         return embed
+
+    def _leaderboard_title(self, metric: str, weekly: bool) -> str:
+        if weekly and metric == "quiz":
+            return "Weekly Quiz Leaderboard"
+        return {
+            "overall": "Overall XP Leaderboard",
+            "voice": "Voice XP Leaderboard",
+            "quiz": "Quiz XP Leaderboard",
+            "stats": "Server Stats Leaderboard",
+        }.get(metric, "Leaderboard")
+
+    def _build_leaderboard_card_rows(
+        self,
+        *,
+        guild: discord.Guild | None,
+        metric: str,
+        entries: list[object],
+        page: int,
+    ) -> list[LeaderboardCardRow]:
+        rows: list[LeaderboardCardRow] = []
+        if metric == "stats":
+            for index, raw in enumerate(entries, start=((page - 1) * 10) + 1):
+                if not isinstance(raw, dict):
+                    continue
+                user_id = int(raw.get("user_id", 0))
+                member = guild.get_member(user_id) if guild else None
+                name = member.display_name if member else f"User {user_id}"
+                primary = (
+                    f"Lv {int(raw.get('level', 0))} | Total XP {compact_number(int(raw.get('total_xp', 0)))}"
+                )
+                secondary = (
+                    f"C {compact_number(int(raw.get('chat_xp', 0)))} "
+                    f"V {compact_number(int(raw.get('voice_xp', 0)))} "
+                    f"Q {compact_number(int(raw.get('quiz_xp', 0)))} "
+                    f"W {compact_number(int(raw.get('quiz_wins', 0)))}"
+                )
+                rows.append(
+                    LeaderboardCardRow(
+                        rank=index,
+                        name=name,
+                        primary=primary,
+                        secondary=secondary,
+                    )
+                )
+            return rows
+
+        for raw in entries:
+            if not isinstance(raw, LeaderboardEntry):
+                continue
+            member = guild.get_member(raw.user_id) if guild else None
+            name = member.display_name if member else f"User {raw.user_id}"
+            rows.append(
+                LeaderboardCardRow(
+                    rank=raw.rank,
+                    name=name,
+                    primary=compact_number(raw.value),
+                    secondary=f"Level {raw.level or 0}",
+                )
+            )
+        return rows
 
 
 async def setup(bot: commands.Bot) -> None:

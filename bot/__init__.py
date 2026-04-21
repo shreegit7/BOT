@@ -79,6 +79,7 @@ class FriendXpTriviaBot(commands.Bot):
             trivia_api=self.trivia_api,
             config=config,
         )
+        self._guild_sync_done = False
 
     async def setup_hook(self) -> None:
         self.tree.on_error = self._on_app_command_error
@@ -102,6 +103,22 @@ class FriendXpTriviaBot(commands.Bot):
     async def on_ready(self) -> None:
         if self.user:
             LOGGER.info("Logged in as %s (%s)", self.user, self.user.id)
+        if self.config.sync_commands_on_startup and not self._guild_sync_done:
+            synced_total = 0
+            for guild in self.guilds:
+                try:
+                    synced = await self.tree.sync(guild=guild)
+                    synced_total += len(synced)
+                except Exception:  # noqa: BLE001
+                    LOGGER.exception(
+                        "Failed guild command sync for guild_id=%s", guild.id
+                    )
+            LOGGER.info(
+                "Guild command sync completed for %s guild(s), %s command entries.",
+                len(self.guilds),
+                synced_total,
+            )
+            self._guild_sync_done = True
 
     async def _on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError

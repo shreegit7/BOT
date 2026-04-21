@@ -45,11 +45,14 @@ class XPService:
         allowed = {
             "quiz_channel_id",
             "levelup_channel_id",
+            "leaderboard_channel_id",
+            "leaderboard_message_id",
             "daily_quiz_time",
             "chat_xp_enabled",
             "voice_xp_enabled",
             "min_quiz_players",
             "quiz_cooldown_minutes",
+            "leaderboard_update_minutes",
             "voice_xp_interval_minutes",
             "voice_xp_base",
             "voice_xp_group_bonus",
@@ -367,6 +370,39 @@ class XPService:
             )
         return entries
 
+    async def get_stats_leaderboard(
+        self,
+        guild_id: int,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[dict[str, int]]:
+        rows = await self.db.fetchall(
+            """
+            SELECT user_id, level, total_xp, chat_xp, voice_xp, quiz_xp, total_voice_minutes, quiz_wins
+            FROM user_stats
+            WHERE guild_id = ?
+            ORDER BY total_xp DESC, user_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (guild_id, limit, offset),
+        )
+        result: list[dict[str, int]] = []
+        for row in rows:
+            result.append(
+                {
+                    "user_id": int(row["user_id"]),
+                    "level": int(row["level"]),
+                    "total_xp": int(row["total_xp"]),
+                    "chat_xp": int(row["chat_xp"]),
+                    "voice_xp": int(row["voice_xp"]),
+                    "quiz_xp": int(row["quiz_xp"]),
+                    "total_voice_minutes": int(row["total_voice_minutes"]),
+                    "quiz_wins": int(row["quiz_wins"]),
+                }
+            )
+        return result
+
     async def count_users_for_metric(self, guild_id: int, metric: str, weekly: bool = False) -> int:
         if weekly and metric == "quiz":
             cutoff = (utc_now() - timedelta(days=7)).isoformat()
@@ -393,6 +429,64 @@ class XPService:
         )
         return int(row["total"]) if row else 0
 
+    async def run_leaderboard_channel_updates(self, bot: discord.Client) -> None:
+        for guild in bot.guilds:
+            cfg = await self.get_guild_config(guild.id)
+            if not cfg.leaderboard_channel_id:
+                continue
+            if cfg.leaderboard_update_minutes <= 0:
+                continue
+
+            channel = guild.get_channel(cfg.leaderboard_channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+
+            entries = await self.get_leaderboard(
+                guild.id,
+                "overall",
+                limit=10,
+                offset=0,
+                weekly=False,
+            )
+            lines: list[str] = []
+            for entry in entries:
+                member = guild.get_member(entry.user_id)
+                name = member.display_name if member else f"User {entry.user_id}"
+                lines.append(f"**{entry.rank}.** {name} - {entry.value} XP")
+
+            embed = discord.Embed(
+                title="Live Leaderboard",
+                description="\n".join(lines) if lines else "No entries yet.",
+                color=Theme.primary,
+            )
+            embed.set_footer(text=f"Auto-updates every {cfg.leaderboard_update_minutes}m")
+
+            now = utc_now()
+            message: discord.Message | None = None
+            if cfg.leaderboard_message_id:
+                try:
+                    message = await channel.fetch_message(cfg.leaderboard_message_id)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = None
+
+            if message is not None:
+                baseline = message.edited_at or message.created_at
+                age_seconds = (now - baseline).total_seconds()
+                if age_seconds < (cfg.leaderboard_update_minutes * 60):
+                    continue
+                try:
+                    await message.edit(embed=embed)
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning("Failed to edit leaderboard message for guild=%s", guild.id)
+                    continue
+            else:
+                try:
+                    created = await channel.send(embed=embed)
+                except (discord.Forbidden, discord.HTTPException):
+                    LOGGER.warning("Failed to send leaderboard message for guild=%s", guild.id)
+                    continue
+                await self.update_guild_config_field(guild.id, "leaderboard_message_id", created.id)
+
     async def _ensure_guild_config_exists(self, guild_id: int) -> None:
         defaults = self.config.defaults
         await self.db.execute(
@@ -404,6 +498,7 @@ class XPService:
                 voice_xp_enabled,
                 min_quiz_players,
                 quiz_cooldown_minutes,
+                leaderboard_update_minutes,
                 voice_xp_interval_minutes,
                 voice_xp_base,
                 voice_xp_group_bonus,
@@ -420,7 +515,7 @@ class XPService:
                 lobby_duration_seconds,
                 questions_per_quiz,
                 question_time_limit_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 guild_id,
@@ -429,6 +524,7 @@ class XPService:
                 int(True),
                 defaults.min_quiz_players,
                 defaults.quiz_cooldown_minutes,
+                5,
                 defaults.voice_xp_interval_minutes,
                 defaults.voice_xp_base,
                 defaults.voice_xp_group_bonus,
@@ -447,6 +543,7 @@ class XPService:
                 defaults.question_time_limit_seconds,
             ),
         )
+
 
     async def _ensure_user_stats_exists(self, guild_id: int, user_id: int) -> None:
         await self.db.execute(

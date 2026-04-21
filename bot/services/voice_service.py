@@ -138,6 +138,14 @@ class VoiceService:
                 if not self._is_eligible_channel_state(member, cfg):
                     break
 
+                # Track voice time for valid presence, even if XP conditions are not met.
+                await self.xp_service.add_voice_minutes(
+                    guild_id=guild_id,
+                    user_id=user_id,
+                    minutes=cfg.voice_xp_interval_minutes,
+                )
+                processed_intervals += 1
+
                 humans = [
                     m
                     for m in member.voice.channel.members
@@ -161,12 +169,6 @@ class VoiceService:
                     member=member,
                     allow_levelup_announce=True,
                 )
-                await self.xp_service.add_voice_minutes(
-                    guild_id=guild_id,
-                    user_id=user_id,
-                    minutes=cfg.voice_xp_interval_minutes,
-                )
-                processed_intervals += 1
 
             if processed_intervals > 0:
                 updated = last_checked + timedelta(seconds=interval_seconds * processed_intervals)

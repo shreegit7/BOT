@@ -100,11 +100,15 @@ class QuizService:
 
             cfg = await self.xp_service.get_guild_config(guild.id)
             if quiz_type == "ondemand":
-                remaining = await self._ondemand_cooldown_remaining(
-                    guild.id, cfg.quiz_cooldown_minutes
-                )
-                if remaining > 0:
-                    return False, f"Quiz cooldown active. Try again in {remaining // 60 + 1}m."
+                if cfg.quiz_cooldown_minutes > 0:
+                    remaining = await self._ondemand_cooldown_remaining(
+                        guild.id, cfg.quiz_cooldown_minutes
+                    )
+                    if remaining > 0:
+                        return (
+                            False,
+                            f"Quiz cooldown active. Try again in {remaining // 60 + 1}m.",
+                        )
 
             picked_category = self._resolve_category(category, cfg.default_quiz_category)
             picked_difficulty = self._resolve_difficulty(difficulty)
