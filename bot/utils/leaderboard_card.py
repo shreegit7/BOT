@@ -56,16 +56,27 @@ def _render_sync(*, title: str, subtitle: str, rows: list[LeaderboardCardRow]) -
 
     row_top = 178
     row_height = 52
-    for idx, row in enumerate(rows[:10]):
-        y = row_top + (idx * row_height)
-        if idx % 2 == 0:
-            draw.rounded_rectangle((70, y - 2, width - 70, y + row_height - 8), radius=10, fill="#0F172A")
+    if not rows:
+        empty_font = _load_font(28)
+        help_font = _load_font(20)
+        draw.text((84, row_top + 40), "No leaderboard data yet.", font=empty_font, fill="#CBD5E1")
+        draw.text(
+            (84, row_top + 84),
+            "Users will appear here after earning XP or using /profile.",
+            font=help_font,
+            fill="#94A3B8",
+        )
+    else:
+        for idx, row in enumerate(rows[:10]):
+            y = row_top + (idx * row_height)
+            if idx % 2 == 0:
+                draw.rounded_rectangle((70, y - 2, width - 70, y + row_height - 8), radius=10, fill="#0F172A")
 
-        left_text = f"{row.rank}. {_short(row.name, 26)}"
-        draw.text((86, y + 8), left_text, font=row_font, fill="#E5E7EB")
-        draw.text((470, y + 8), _short(row.primary, 52), font=row_font, fill="#67E8F9")
-        if row.secondary:
-            draw.text((760, y + 11), _short(row.secondary, 40), font=row_small_font, fill="#A5B4FC")
+            left_text = f"{row.rank}. {_short(row.name, 26)}"
+            draw.text((86, y + 8), left_text, font=row_font, fill="#E5E7EB")
+            draw.text((470, y + 8), _short(row.primary, 52), font=row_font, fill="#67E8F9")
+            if row.secondary:
+                draw.text((760, y + 11), _short(row.secondary, 40), font=row_small_font, fill="#A5B4FC")
 
     output = io.BytesIO()
     image.save(output, "PNG")
@@ -80,4 +91,3 @@ async def render_leaderboard_card(
     rows: list[LeaderboardCardRow],
 ) -> io.BytesIO:
     return await asyncio.to_thread(_render_sync, title=title, subtitle=subtitle, rows=rows)
-
