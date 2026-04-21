@@ -11,7 +11,8 @@ import discord
 from bot.config import AppConfig
 from bot.database import Database
 from bot.models import GuildConfig, LeaderboardEntry, LevelUpEvent, UserStats
-from bot.utils.formatting import Theme, normalize_for_spam_check
+from bot.utils.formatting import Theme, compact_number, normalize_for_spam_check
+from bot.utils.leaderboard_card import LeaderboardCardRow, render_leaderboard_card
 from bot.utils.levels import level_from_total_xp
 from bot.utils.time import utc_now
 
@@ -460,6 +461,18 @@ class XPService:
                 color=Theme.primary,
             )
             embed.set_footer(text=f"Auto-updates every {cfg.leaderboard_update_minutes}m")
+            card_rows: list[LeaderboardCardRow] = []
+            for entry in entries:
+                member = guild.get_member(entry.user_id)
+                name = member.display_name if member else f"User {entry.user_id}"
+                card_rows.append(
+                    LeaderboardCardRow(
+                        rank=entry.rank,
+                        name=name,
+                        primary=f"{compact_number(entry.value)} XP",
+                        secondary=f"Level {entry.level or 0}",
+                    )
+                )
 
             now = utc_now()
             message: discord.Message | None = None
@@ -475,16 +488,36 @@ class XPService:
                 if age_seconds < (cfg.leaderboard_update_minutes * 60):
                     continue
                 try:
-                    await message.edit(embed=embed)
+                    card = await render_leaderboard_card(
+                        title="Live Leaderboard",
+                        subtitle=f"Top players in {guild.name}",
+                        rows=card_rows,
+                    )
+                    file = discord.File(card, filename="leaderboard_card.png")
+                    embed.set_image(url="attachment://leaderboard_card.png")
+                    await message.edit(embed=embed, attachments=[file])
                 except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.warning("Failed to edit leaderboard message for guild=%s", guild.id)
-                    continue
+                    try:
+                        await message.edit(embed=embed)
+                    except (discord.Forbidden, discord.HTTPException):
+                        LOGGER.warning("Failed to edit leaderboard message for guild=%s", guild.id)
+                        continue
             else:
                 try:
-                    created = await channel.send(embed=embed)
+                    card = await render_leaderboard_card(
+                        title="Live Leaderboard",
+                        subtitle=f"Top players in {guild.name}",
+                        rows=card_rows,
+                    )
+                    file = discord.File(card, filename="leaderboard_card.png")
+                    embed.set_image(url="attachment://leaderboard_card.png")
+                    created = await channel.send(embed=embed, file=file)
                 except (discord.Forbidden, discord.HTTPException):
-                    LOGGER.warning("Failed to send leaderboard message for guild=%s", guild.id)
-                    continue
+                    try:
+                        created = await channel.send(embed=embed)
+                    except (discord.Forbidden, discord.HTTPException):
+                        LOGGER.warning("Failed to send leaderboard message for guild=%s", guild.id)
+                        continue
                 await self.update_guild_config_field(guild.id, "leaderboard_message_id", created.id)
 
     async def _ensure_guild_config_exists(self, guild_id: int) -> None:
